@@ -1,138 +1,463 @@
-import type { MetaFunction } from "@remix-run/node";
+import { json, type LoaderFunction, type MetaFunction } from "@remix-run/node";
+import { useLoaderData, useSearchParams, Link } from "@remix-run/react";
+import { prisma } from "~/utils/db.server";
+import type {
+  Shop,
+  Generation,
+  BillingLog,
+  Plan,
+  Session,
+} from "@prisma/client";
 
 export const meta: MetaFunction = () => {
   return [
-    { title: "New Remix App" },
-    { name: "description", content: "Welcome to Remix!" },
+    { title: "Fitsee Dashboard - All Shops" },
+    {
+      name: "description",
+      content: "Comprehensive dashboard for all Fitsee shops",
+    },
   ];
 };
 
+export const loader: LoaderFunction = async ({ request }) => {
+  const url = new URL(request.url);
+  const dateFilter = url.searchParams.get("dateFilter") || "all";
+
+  // Calculate date ranges
+  const now = new Date();
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const sevenDaysAgo = new Date(today.getTime() - 7 * 24 * 60 * 60 * 1000);
+  const thirtyDaysAgo = new Date(today.getTime() - 30 * 24 * 60 * 60 * 1000);
+
+  let dateFilterCondition = {};
+
+  switch (dateFilter) {
+    case "today":
+      dateFilterCondition = {
+        createdAt: {
+          gte: today,
+        },
+      };
+      break;
+    case "7days":
+      dateFilterCondition = {
+        createdAt: {
+          gte: sevenDaysAgo,
+        },
+      };
+      break;
+    case "30days":
+      dateFilterCondition = {
+        createdAt: {
+          gte: thirtyDaysAgo,
+        },
+      };
+      break;
+    default:
+      dateFilterCondition = {};
+  }
+
+  const shops = await prisma.shop.findMany({
+    where: dateFilterCondition,
+    include: {
+      Generation: true,
+      BillingLog: true,
+      Plan: true,
+      Session: true,
+    },
+    orderBy: {
+      createdAt: "desc",
+    },
+  });
+
+  // Calculate summary statistics
+  const totalShops = shops.length;
+  const activeShops = shops.filter((shop) => !shop.isUninstalled).length;
+  const totalGenerations = shops.reduce(
+    (sum, shop) => sum + shop.Generation.length,
+    0
+  );
+  const totalRevenue = shops.reduce(
+    (sum, shop) =>
+      sum +
+      shop.BillingLog.reduce((logSum, log) => {
+        const transactionFee = log.price * 0.029; // 2.90% transaction fee
+        return logSum + (log.price - transactionFee);
+      }, 0),
+    0
+  );
+  const shopsWithPlans = shops.filter((shop) => shop.Plan).length;
+
+  return json({
+    shops,
+    stats: {
+      totalShops,
+      activeShops,
+      totalGenerations,
+      totalRevenue,
+      shopsWithPlans,
+    },
+    dateFilter,
+  });
+};
+
 export default function Index() {
+  const { shops, stats, dateFilter } = useLoaderData<typeof loader>();
+  const [searchParams, setSearchParams] = useSearchParams();
+
+  const handleDateFilterChange = (filter: string) => {
+    const newSearchParams = new URLSearchParams(searchParams);
+    newSearchParams.set("dateFilter", filter);
+    setSearchParams(newSearchParams);
+  };
+
   return (
-    <div className="flex h-screen items-center justify-center">
-      <div className="flex flex-col items-center gap-16">
-        <header className="flex flex-col items-center gap-9">
-          <h1 className="leading text-2xl font-bold text-gray-800 dark:text-gray-100">
-            Welcome to <span className="sr-only">Remix</span>
+    <div className="min-h-screen bg-gray-50 dark:bg-gray-900">
+      {/* Header */}
+      <div className="bg-white dark:bg-gray-800 shadow-sm border-b border-gray-200 dark:border-gray-700">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
+          <h1 className="text-3xl font-bold text-gray-900 dark:text-white">
+            Fitsee Dashboard
           </h1>
-          <div className="h-[144px] w-[434px]">
-            <img
-              src="/logo-light.png"
-              alt="Remix"
-              className="block w-full dark:hidden"
-            />
-            <img
-              src="/logo-dark.png"
-              alt="Remix"
-              className="hidden w-full dark:block"
-            />
-          </div>
-        </header>
-        <nav className="flex flex-col items-center justify-center gap-4 rounded-3xl border border-gray-200 p-6 dark:border-gray-700">
-          <p className="leading-6 text-gray-700 dark:text-gray-200">
-            What&apos;s next?
+          <p className="mt-2 text-gray-600 dark:text-gray-300">
+            Comprehensive overview of all shops and their performance
           </p>
-          <ul>
-            {resources.map(({ href, text, icon }) => (
-              <li key={href}>
-                <a
-                  className="group flex items-center gap-3 self-stretch p-3 leading-normal text-blue-700 hover:underline dark:text-blue-500"
-                  href={href}
-                  target="_blank"
-                  rel="noreferrer"
-                >
-                  {icon}
-                  {text}
-                </a>
-              </li>
-            ))}
-          </ul>
-        </nav>
+        </div>
+      </div>
+
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        {/* Date Filters */}
+        <div className="mb-6">
+          <div className="flex flex-wrap gap-2">
+            <button
+              onClick={() => handleDateFilterChange("all")}
+              className={`px-4 py-2 text-sm font-medium rounded-md transition-colors ${
+                dateFilter === "all"
+                  ? "bg-blue-600 text-white"
+                  : "bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 border border-gray-300 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-700"
+              }`}
+            >
+              All Time
+            </button>
+            <button
+              onClick={() => handleDateFilterChange("today")}
+              className={`px-4 py-2 text-sm font-medium rounded-md transition-colors ${
+                dateFilter === "today"
+                  ? "bg-blue-600 text-white"
+                  : "bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 border border-gray-300 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-700"
+              }`}
+            >
+              Today
+            </button>
+            <button
+              onClick={() => handleDateFilterChange("7days")}
+              className={`px-4 py-2 text-sm font-medium rounded-md transition-colors ${
+                dateFilter === "7days"
+                  ? "bg-blue-600 text-white"
+                  : "bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 border border-gray-300 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-700"
+              }`}
+            >
+              Last 7 Days
+            </button>
+            <button
+              onClick={() => handleDateFilterChange("30days")}
+              className={`px-4 py-2 text-sm font-medium rounded-md transition-colors ${
+                dateFilter === "30days"
+                  ? "bg-blue-600 text-white"
+                  : "bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 border border-gray-300 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-700"
+              }`}
+            >
+              Last 30 Days
+            </button>
+          </div>
+        </div>
+
+        {/* Stats Cards */}
+        <div className="grid grid-cols-2 md:grid-cols-2 lg:grid-cols-4 gap-3 md:gap-6 mb-8">
+          <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-3 md:p-6 border border-gray-200 dark:border-gray-700">
+            <div className="flex flex-col md:flex-row md:items-center">
+              <div className="flex-shrink-0 mb-2 md:mb-0">
+                <div className="w-6 h-6 md:w-8 md:h-8 bg-blue-500 rounded-md flex items-center justify-center">
+                  <svg
+                    className="w-4 h-4 md:w-5 md:h-5 text-white"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={2}
+                      d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4"
+                    />
+                  </svg>
+                </div>
+              </div>
+              <div className="md:ml-4">
+                <p className="text-xs md:text-sm font-medium text-gray-500 dark:text-gray-400">
+                  Total Shops
+                </p>
+                <p className="text-lg md:text-2xl font-semibold text-gray-900 dark:text-white">
+                  {stats.totalShops}
+                </p>
+              </div>
+            </div>
+          </div>
+
+          <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-3 md:p-6 border border-gray-200 dark:border-gray-700">
+            <div className="flex flex-col md:flex-row md:items-center">
+              <div className="flex-shrink-0 mb-2 md:mb-0">
+                <div className="w-6 h-6 md:w-8 md:h-8 bg-green-500 rounded-md flex items-center justify-center">
+                  <svg
+                    className="w-4 h-4 md:w-5 md:h-5 text-white"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={2}
+                      d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"
+                    />
+                  </svg>
+                </div>
+              </div>
+              <div className="md:ml-4">
+                <p className="text-xs md:text-sm font-medium text-gray-500 dark:text-gray-400">
+                  Active Shops
+                </p>
+                <p className="text-lg md:text-2xl font-semibold text-gray-900 dark:text-white">
+                  {stats.activeShops}
+                </p>
+              </div>
+            </div>
+          </div>
+
+          <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-3 md:p-6 border border-gray-200 dark:border-gray-700">
+            <div className="flex flex-col md:flex-row md:items-center">
+              <div className="flex-shrink-0 mb-2 md:mb-0">
+                <div className="w-6 h-6 md:w-8 md:h-8 bg-purple-500 rounded-md flex items-center justify-center">
+                  <svg
+                    className="w-4 h-4 md:w-5 md:h-5 text-white"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={2}
+                      d="M13 10V3L4 14h7v7l9-11h-7z"
+                    />
+                  </svg>
+                </div>
+              </div>
+              <div className="md:ml-4">
+                <p className="text-xs md:text-sm font-medium text-gray-500 dark:text-gray-400">
+                  Total Generations
+                </p>
+                <p className="text-lg md:text-2xl font-semibold text-gray-900 dark:text-white">
+                  {stats.totalGenerations}
+                </p>
+              </div>
+            </div>
+          </div>
+
+          <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-3 md:p-6 border border-gray-200 dark:border-gray-700">
+            <div className="flex flex-col md:flex-row md:items-center">
+              <div className="flex-shrink-0 mb-2 md:mb-0">
+                <div className="w-6 h-6 md:w-8 md:h-8 bg-yellow-500 rounded-md flex items-center justify-center">
+                  <svg
+                    className="w-4 h-4 md:w-5 md:h-5 text-white"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={2}
+                      d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1"
+                    />
+                  </svg>
+                </div>
+              </div>
+              <div className="md:ml-4">
+                <p className="text-xs md:text-sm font-medium text-gray-500 dark:text-gray-400">
+                  Total Revenue
+                </p>
+                <p className="text-lg md:text-2xl font-semibold text-gray-900 dark:text-white">
+                  ${stats.totalRevenue.toFixed(2)}
+                </p>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Shops Table */}
+        <div className="bg-white dark:bg-gray-800 shadow rounded-lg border border-gray-200 dark:border-gray-700">
+          <div className="px-6 py-4 border-b border-gray-200 dark:border-gray-700">
+            <h2 className="text-lg font-medium text-gray-900 dark:text-white">
+              All Shops
+            </h2>
+          </div>
+
+          {shops.length === 0 ? (
+            <div className="text-center py-12">
+              <p className="text-gray-500 dark:text-gray-400 text-lg">
+                No shops found
+              </p>
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
+                <thead className="bg-gray-50 dark:bg-gray-700">
+                  <tr>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
+                      Shop
+                    </th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
+                      Status
+                    </th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
+                      Plan
+                    </th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
+                      Generations
+                    </th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
+                      Revenue
+                    </th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
+                      Created
+                    </th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
+                      Actions
+                    </th>
+                  </tr>
+                </thead>
+                <tbody className="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
+                  {shops.map(
+                    (
+                      shop: Shop & {
+                        Generation: Generation[];
+                        BillingLog: BillingLog[];
+                        Plan: Plan | null;
+                        Session: Session | null;
+                      }
+                    ) => {
+                      const shopRevenue = shop.BillingLog.reduce(
+                        (sum: number, log: BillingLog) => {
+                          const transactionFee = log.price * 0.029; // 2.90% transaction fee
+                          return sum + (log.price - transactionFee);
+                        },
+                        0
+                      );
+                      const generationsCount = shop.Generation.length;
+
+                      return (
+                        <tr
+                          key={shop.id}
+                          className="hover:bg-gray-50 dark:hover:bg-gray-700"
+                        >
+                          <td className="px-6 py-4 whitespace-nowrap">
+                            <div className="flex items-center">
+                              <div className="flex-shrink-0 h-10 w-10">
+                                <div className="h-10 w-10 rounded-full bg-gray-300 dark:bg-gray-600 flex items-center justify-center">
+                                  <span className="text-sm font-medium text-gray-700 dark:text-gray-300">
+                                    {shop.domain.charAt(0).toUpperCase()}
+                                  </span>
+                                </div>
+                              </div>
+                              <div className="ml-4">
+                                <a
+                                  href={`https://${shop.domain}`}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="text-sm font-medium text-blue-600 hover:text-blue-900 dark:text-blue-400 dark:hover:text-blue-300 hover:underline"
+                                >
+                                  {shop.domain}
+                                </a>
+                                <div className="text-sm text-gray-500 dark:text-gray-400">
+                                  {shop.email || "No email"}
+                                </div>
+                                {shop.country && (
+                                  <div className="text-xs text-gray-400 dark:text-gray-500">
+                                    {shop.country}
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap">
+                            <span
+                              className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${
+                                shop.isUninstalled
+                                  ? "bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200"
+                                  : "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200"
+                              }`}
+                            >
+                              {shop.isUninstalled ? "Uninstalled" : "Active"}
+                            </span>
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-white">
+                            {shop.Plan ? (
+                              <div>
+                                <div className="font-medium">
+                                  {shop.Plan.name}
+                                </div>
+                                <div className="text-gray-500 dark:text-gray-400">
+                                  {shop.Plan.hasUnlimitedGenerations
+                                    ? "Unlimited"
+                                    : `${shop.Plan.availableGenerations} available`}
+                                </div>
+                              </div>
+                            ) : (
+                              <span className="text-gray-400 dark:text-gray-500">
+                                No plan
+                              </span>
+                            )}
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-white">
+                            <div className="font-medium">
+                              {generationsCount}
+                            </div>
+                            {shop.Plan && (
+                              <div className="text-gray-500 dark:text-gray-400">
+                                {shop.Plan.totalGenerationsUsed} used
+                              </div>
+                            )}
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-white">
+                            <div className="font-medium">
+                              ${shopRevenue.toFixed(2)}
+                            </div>
+                            <div className="text-gray-500 dark:text-gray-400">
+                              {shop.BillingLog.length} transactions
+                            </div>
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-400">
+                            {new Date(shop.createdAt).toLocaleDateString()}
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
+                            <Link
+                              to={`/shop/${shop.id}`}
+                              className="text-blue-600 hover:text-blue-900 dark:text-blue-400 dark:hover:text-blue-300"
+                            >
+                              View Details
+                            </Link>
+                          </td>
+                        </tr>
+                      );
+                    }
+                  )}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );
 }
-
-const resources = [
-  {
-    href: "https://remix.run/start/quickstart",
-    text: "Quick Start (5 min)",
-    icon: (
-      <svg
-        xmlns="http://www.w3.org/2000/svg"
-        width="24"
-        height="20"
-        viewBox="0 0 20 20"
-        fill="none"
-        className="stroke-gray-600 group-hover:stroke-current dark:stroke-gray-300"
-      >
-        <path
-          d="M8.51851 12.0741L7.92592 18L15.6296 9.7037L11.4815 7.33333L12.0741 2L4.37036 10.2963L8.51851 12.0741Z"
-          strokeWidth="1.5"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-        />
-      </svg>
-    ),
-  },
-  {
-    href: "https://remix.run/start/tutorial",
-    text: "Tutorial (30 min)",
-    icon: (
-      <svg
-        xmlns="http://www.w3.org/2000/svg"
-        width="24"
-        height="20"
-        viewBox="0 0 20 20"
-        fill="none"
-        className="stroke-gray-600 group-hover:stroke-current dark:stroke-gray-300"
-      >
-        <path
-          d="M4.561 12.749L3.15503 14.1549M3.00811 8.99944H1.01978M3.15503 3.84489L4.561 5.2508M8.3107 1.70923L8.3107 3.69749M13.4655 3.84489L12.0595 5.2508M18.1868 17.0974L16.635 18.6491C16.4636 18.8205 16.1858 18.8205 16.0144 18.6491L13.568 16.2028C13.383 16.0178 13.0784 16.0347 12.915 16.239L11.2697 18.2956C11.047 18.5739 10.6029 18.4847 10.505 18.142L7.85215 8.85711C7.75756 8.52603 8.06365 8.21994 8.39472 8.31453L17.6796 10.9673C18.0223 11.0653 18.1115 11.5094 17.8332 11.7321L15.7766 13.3773C15.5723 13.5408 15.5554 13.8454 15.7404 14.0304L18.1868 16.4767C18.3582 16.6481 18.3582 16.926 18.1868 17.0974Z"
-          strokeWidth="1.5"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-        />
-      </svg>
-    ),
-  },
-  {
-    href: "https://remix.run/docs",
-    text: "Remix Docs",
-    icon: (
-      <svg
-        xmlns="http://www.w3.org/2000/svg"
-        width="24"
-        height="20"
-        viewBox="0 0 20 20"
-        fill="none"
-        className="stroke-gray-600 group-hover:stroke-current dark:stroke-gray-300"
-      >
-        <path
-          d="M9.99981 10.0751V9.99992M17.4688 17.4688C15.889 19.0485 11.2645 16.9853 7.13958 12.8604C3.01467 8.73546 0.951405 4.11091 2.53116 2.53116C4.11091 0.951405 8.73546 3.01467 12.8604 7.13958C16.9853 11.2645 19.0485 15.889 17.4688 17.4688ZM2.53132 17.4688C0.951566 15.8891 3.01483 11.2645 7.13974 7.13963C11.2647 3.01471 15.8892 0.951453 17.469 2.53121C19.0487 4.11096 16.9854 8.73551 12.8605 12.8604C8.73562 16.9853 4.11107 19.0486 2.53132 17.4688Z"
-          strokeWidth="1.5"
-          strokeLinecap="round"
-        />
-      </svg>
-    ),
-  },
-  {
-    href: "https://rmx.as/discord",
-    text: "Join Discord",
-    icon: (
-      <svg
-        xmlns="http://www.w3.org/2000/svg"
-        width="24"
-        height="20"
-        viewBox="0 0 24 20"
-        fill="none"
-        className="stroke-gray-600 group-hover:stroke-current dark:stroke-gray-300"
-      >
-        <path
-          d="M15.0686 1.25995L14.5477 1.17423L14.2913 1.63578C14.1754 1.84439 14.0545 2.08275 13.9422 2.31963C12.6461 2.16488 11.3406 2.16505 10.0445 2.32014C9.92822 2.08178 9.80478 1.84975 9.67412 1.62413L9.41449 1.17584L8.90333 1.25995C7.33547 1.51794 5.80717 1.99419 4.37748 2.66939L4.19 2.75793L4.07461 2.93019C1.23864 7.16437 0.46302 11.3053 0.838165 15.3924L0.868838 15.7266L1.13844 15.9264C2.81818 17.1714 4.68053 18.1233 6.68582 18.719L7.18892 18.8684L7.50166 18.4469C7.96179 17.8268 8.36504 17.1824 8.709 16.4944L8.71099 16.4904C10.8645 17.0471 13.128 17.0485 15.2821 16.4947C15.6261 17.1826 16.0293 17.8269 16.4892 18.4469L16.805 18.8725L17.3116 18.717C19.3056 18.105 21.1876 17.1751 22.8559 15.9238L23.1224 15.724L23.1528 15.3923C23.5873 10.6524 22.3579 6.53306 19.8947 2.90714L19.7759 2.73227L19.5833 2.64518C18.1437 1.99439 16.6386 1.51826 15.0686 1.25995ZM16.6074 10.7755L16.6074 10.7756C16.5934 11.6409 16.0212 12.1444 15.4783 12.1444C14.9297 12.1444 14.3493 11.6173 14.3493 10.7877C14.3493 9.94885 14.9378 9.41192 15.4783 9.41192C16.0471 9.41192 16.6209 9.93851 16.6074 10.7755ZM8.49373 12.1444C7.94513 12.1444 7.36471 11.6173 7.36471 10.7877C7.36471 9.94885 7.95323 9.41192 8.49373 9.41192C9.06038 9.41192 9.63892 9.93712 9.6417 10.7815C9.62517 11.6239 9.05462 12.1444 8.49373 12.1444Z"
-          strokeWidth="1.5"
-        />
-      </svg>
-    ),
-  },
-];

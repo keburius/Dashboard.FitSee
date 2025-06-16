@@ -1,0 +1,122 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model BillingLog {
+  id        String   @id
+  chargeId  String?
+  shopId    String
+  planId    String?
+  eventType String
+  credits   Int
+  price     Float
+  timestamp DateTime @default(now())
+  Shop      Shop     @relation(fields: [shopId], references: [id])
+}
+
+model Generation {
+  id              String   @id
+  shopId          String
+  productId       String
+  productName     String   @default("")
+  productHandle   String   @default("")
+  productImage    String   @default("")
+  productCategory String?
+  userEmail       String
+  addedToCart     Boolean  @default(false)
+  createdAt       DateTime @default(now())
+  Shop            Shop     @relation(fields: [shopId], references: [id], onDelete: Cascade)
+}
+
+model Log {
+  id        String   @id
+  endpoint  String
+  method    String
+  status    Int
+  shopId    String?
+  body      Json?
+  headers   Json?
+  response  Json?
+  createdAt DateTime @default(now())
+  Shop      Shop?    @relation(fields: [shopId], references: [id], onDelete: Cascade)
+}
+
+model Plan {
+  id                      String    @id
+  name                    String
+  availableGenerations    Int       @default(0)
+  totalGenerationsUsed    Int       @default(0)
+  hasUnlimitedGenerations Boolean   @default(false)
+  isActive                Boolean   @default(true)
+  lastResetAt             DateTime?
+  createdAt               DateTime  @default(now())
+  updatedAt               DateTime
+  Shop                    Shop?
+}
+
+model ProcessedWebhook {
+  id         String   @id
+  topic      String
+  shopDomain String
+  receivedAt DateTime @default(now())
+}
+
+model Session {
+  id            String    @id
+  shop          String
+  state         String
+  isOnline      Boolean   @default(false)
+  scope         String?
+  expires       DateTime?
+  accessToken   String
+  userId        BigInt?
+  firstName     String?
+  lastName      String?
+  email         String?
+  accountOwner  Boolean   @default(false)
+  locale        String?
+  collaborator  Boolean?  @default(false)
+  emailVerified Boolean?  @default(false)
+  Shop          Shop?
+}
+
+model Shop {
+  id                 String       @id
+  externalId         String       @default("")
+  domain             String       @unique
+  shopifyId          String       @unique
+  email              String?
+  phone              String?
+  country            String?
+  apiKey             String
+  sessionId          String?
+  createdAt          DateTime     @default(now())
+  updatedAt          DateTime
+  isUninstalled      Boolean      @default(false)
+  shopify_session_id String?      @unique @db.VarChar(255)
+  planId             String?      @unique
+  allowTestPayment   Boolean      @default(false)
+  BillingLog         BillingLog[]
+  Generation         Generation[]
+  Log                Log[]
+  Plan               Plan?        @relation(fields: [planId], references: [id], onDelete: Cascade)
+  Session            Session?     @relation(fields: [shopify_session_id], references: [id])
+}
+
+enum BillingEventType {
+  PLAN_CHANGE
+  PLAN_CANCEL
+  TOP_UP
+}
+
+enum SectionType {
+  MOST_VIEWED
+  RELATED_PRODUCTS
+  SIMILAR_PRODUCTS
+  FREQUENTLY_BOUGHT_TOGETHER
+}
