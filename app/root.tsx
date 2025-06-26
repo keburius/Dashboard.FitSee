@@ -32,6 +32,31 @@ export function Layout({ children }: { children: React.ReactNode }) {
         <Links />
       </head>
       <body>
+        {/* Navigation Bar */}
+        <nav className="bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-800">
+          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div className="flex h-14 items-center gap-6">
+              <a
+                href="/"
+                className="text-lg font-bold text-blue-600 dark:text-blue-400 hover:underline"
+              >
+                Dashboard
+              </a>
+              <a
+                href="/shops"
+                className="text-gray-700 dark:text-gray-200 hover:text-blue-600 dark:hover:text-blue-400"
+              >
+                Shops
+              </a>
+              <a
+                href="/generations"
+                className="text-gray-700 dark:text-gray-200 hover:text-blue-600 dark:hover:text-blue-400"
+              >
+                Generations Stats
+              </a>
+            </div>
+          </div>
+        </nav>
         {children}
         <ScrollRestoration />
         <Scripts />
